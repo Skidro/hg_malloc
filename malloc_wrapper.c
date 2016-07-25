@@ -41,8 +41,18 @@
 #define TRACKER(list_node)										\
 		(container_of(list_node, track_t, list))
 		
-/* Set this macro to 1 if the allocator is being built for debugging */
-#define BUG_ON	1
+/* Turn profiling on or off completely. In case profiling is turned on, statements are
+   selectively profiled using the PROFILE mechanism defined below */
+#define PROFILE_MASTER_CONTROL	1
+
+#if (PROFILE_MASTER_CONTROL == 1)
+  #define PROFILE(control, statement) PROFILE_##control(statement)
+#else
+  #define PROFILE(control, statement)
+#endif
+
+#define PROFILE_ON(statement) 	statement
+#define PROFILE_OFF(statement)
 
 /*********************************************
  * Global Data
@@ -60,13 +70,12 @@ static void    		*g_mem_ptr;
 static int 		init = 0;
 static unsigned long	max_used = 0;
 
-#if (BUG_ON == 1)
-
-/* These stats are tracked only when library is built with debug support */
-static unsigned long	max_req  = 0;
-static unsigned long	trackers = 0;
-
-#endif
+/* These stats are tracked only when library is built with profiling support */
+PROFILE(ON, static unsigned long	max_req  = 0);
+PROFILE(ON, static unsigned long	trackers = 0);
+PROFILE(ON, static unsigned long	max_trackers = 0);
+PROFILE(ON, static unsigned long	reused_trackers = 0);
+PROFILE(ON, static unsigned long	max_trackers_new = 0);
 
 /*********************************************
  * Helper Functions
@@ -93,10 +102,12 @@ static inline void populate_tracker(track_t *tracker, unsigned long size)
 	tracker->address = MEM_GET_ADDRESS(tracker);
 	tracker->free = 0;
 
-#if (BUG_ON == 1)
 	/* Increment the number of active trackers */
-	trackers++;
-#endif
+	PROFILE(ON, trackers++);
+	PROFILE(ON, max_trackers_new++);
+
+	/* Keep track of overall maximum number of trackers */
+	PROFILE(ON, max_trackers = (max_trackers_new > max_trackers)? max_trackers_new : max_trackers);
 
 	return;
 }
@@ -133,7 +144,7 @@ void *__wrap_malloc(size_t size)
 
 		/* Verify that the allocation was successful */
 		if (g_mem_ptr == MAP_FAILED) {
-			perror("alloc failed");
+			perror("Allocation from Huge Page Pool Failed. Please verify that hugetlbfs is properly mounted!");
 			exit(1);
 		}
 
@@ -150,36 +161,38 @@ void *__wrap_malloc(size_t size)
 		goto done;
 	}
 
-	/* Look through the allocated chunks to find an appropriate sized one which is free */
-	list_for_each_entry(tracker, &alloc_list, list) {
-		if (tracker->free && tracker->size >= size) {
-			/* Found the right chunk */
-			tracker->free = 0;
-
-			/* Return the tracker to caller */
-			goto done;
-		}
-	}
-
 	/* No free chunk of the right size available. Allocate a chunk in the memory page */
 	if (list_empty(&alloc_list)) {
+		/* Since the list is empty, there are no trackers */
+		PROFILE(ON, max_trackers_new = 0);
+
 		/* List is empty so create the first chunk */
 		tracker = (track_t *)g_mem_ptr;
 
 		/* Populate the tracker with information regaring this allocation */
 		populate_tracker(tracker, (unsigned long)size);
 
-#if (BUG_ON == 1)
-
 		/* We need to track max_used here as well */
-		max_used = (unsigned long)MEM_GET_ADDRESS(g_mem_ptr) + (unsigned long)size;
-
-#endif
+		PROFILE(ON, max_used = (unsigned long)MEM_GET_ADDRESS(g_mem_ptr) + (unsigned long)size);
 
 		/* Return the address to the caller */
 		goto done;
 	} else {
-		/* List is not empty. Look for the last element in the list */
+		/* Look through the allocated chunks to find an appropriate sized one which is free */
+		list_for_each_entry(tracker, &alloc_list, list) {
+			if (tracker->free && tracker->size >= size) {
+				/* Found the right chunk */
+				tracker->free = 0;
+
+				/* Keep track of trackers reusage information */
+				PROFILE(ON, reused_trackers++);
+
+				/* Return the tracker to caller */
+				goto done;
+			}
+		}
+
+		/* Expand the list */
 		mem_end = MEM_GET_END();
 
 		/* Since we are expanding the heap, this is the best place to record max heap usage */
@@ -200,28 +213,14 @@ void *__wrap_malloc(size_t size)
 		/* Populate the tracker with information regaring this allocation */
 		populate_tracker(tracker, (unsigned long)size);
 
-#if (BUG_ON == 1)
-
-		/* For the purpose of debugging, we don't want the tracker size into account */
-		max_used -= trackers * sizeof(track_t);
-
-#endif
-
 		/* Return the address to the caller */
 		goto done;
 	}
 
 done:
 
-	/* Display some debug information */
-	// printf("Returning Address : %p\n", tracker->address);
-
-#if (BUG_ON == 1)
-
 	/* Find out if this the largest allocation request so far */
-	max_req = (size < max_req) ? max_req : size;
-
-#endif
+	PROFILE(ON, max_req = (size < max_req) ? max_req : size);
 
 	/* Return the address to caller */
 	return tracker->address;
@@ -255,32 +254,21 @@ void __wrap_free(void *ptr)
 		while (!(list_empty(&alloc_list)) && TRACKER(alloc_list.prev)->free == 1) {
 			list_del_init(alloc_list.prev);
 
-#if (BUG_ON == 1)
-
 			/* Decrement the number of trackers */
-			trackers--;
+			PROFILE(ON, trackers--);
 		}
 
 		/* Decrement the number of trackers */
-		trackers--;
-
-#else
-
-		}
-
-#endif
-
+		PROFILE(ON, trackers--);
 	}
 
-#if (BUG_ON == 1)
-
-	printf("***** Allocator Stats\n");
-	printf("Heap Usage        : %lu Bytes\n", (list_empty(&alloc_list))? 0 : (unsigned long)MEM_GET_END() - (unsigned long)g_mem_ptr);
-	printf("Max Heap Used     : %lu Bytes\n", max_used - (unsigned long)g_mem_ptr);
-	printf("Max Request       : %lu Bytes\n", max_req);
-	printf("Trackers          : %lu\n", trackers);
-
-#endif
+	PROFILE(ON, printf("\n***** Allocator Stats\n"));
+	PROFILE(ON, printf("Heap Usage        : %lu Bytes\n", (list_empty(&alloc_list))? 0 : (unsigned long)MEM_GET_END() - (unsigned long)g_mem_ptr));
+	PROFILE(ON, printf("Max Heap Used     : %lu Bytes\n", max_used - (unsigned long)g_mem_ptr - (max_trackers * sizeof(track_t))));
+	PROFILE(ON, printf("Max Request       : %lu Bytes\n", max_req));
+	PROFILE(ON, printf("Trackers          : %lu\n", trackers));
+	PROFILE(ON, printf("Max Trackers      : %lu\n", max_trackers));
+	PROFILE(ON, printf("Reused Trackers   : %lu\n\n", reused_trackers));
 
 	return;
 }
