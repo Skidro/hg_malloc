@@ -255,12 +255,21 @@ void __wrap_free(void *ptr)
 		while (!(list_empty(&alloc_list)) && TRACKER(alloc_list.prev)->free == 1) {
 			list_del_init(alloc_list.prev);
 
+#if (BUG_ON == 1)
+
 			/* Decrement the number of trackers */
 			trackers--;
 		}
 
 		/* Decrement the number of trackers */
 		trackers--;
+
+#else
+
+		}
+
+#endif
+
 	}
 
 #if (BUG_ON == 1)
