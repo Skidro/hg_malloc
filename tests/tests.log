@@ -1,0 +1,58 @@
+In order to check malloc the following tests should be conducted:
+
+1. Simple Test - Allocation and Deallocation
+- Allocate 1024 bytes
+- Deallocate 1024 bytes
+- Sanity Check : Heap usage at the end of program should be zero
+- Exp : Max memory usage should be 1024 bytes
+- Exp : Largest allocation should be 1024 bytes
+
+2. Multiple Allocations
+- Allocate an array of 1024 pointers - 8KB
+- For each allocated pointer, allocate 1024 bytes - 1024 x 1024 = 1MB
+- Free up all the pointers one-by-one
+- Free up the pointer array
+- Sanity Check : Heap usage at the end of program should be zero
+- Exp : Max memory usage should be 8KB + 1MB = 1024 x 1024 + 8 x 1024 = 1056768 bytes
+- Exp : Largest allocation should be 8 Kbytes
+
+3. Out of Memory - Restriction of the current version
+- Allocate 950KB
+- Allocate 950KB
+- Allocate 512KB
+- Santiy Check : Program will exit
+- Exp : First two allocation should succeed
+- Exp : Thrid allocation should fail with message : "Out of Memory!"
+
+4. Reusage of Tracker
+- Allocate 1024 bytes
+- Allocate 512 bytes
+- Allocate 1024 bytes
+- Deallocate 512 bytes
+- Allocate 512 bytes
+- Deallocate all memory
+- Sanity Check : Heap usage at the end of program should be zero
+- Exp : The address returned for 4th allocation (i.e. 512 bytes) should be the same as
+        the address returned for 2nd allocation
+- Exp : Max heap usage should be 1024 + 1024 + 512 = 2560 bytes
+- Exp : Largest allocation should be 1024 bytes
+
+5. Fragmentation
+- Allocate 1024 bytes
+- Allocate 512 bytes
+- Deallocate 1024 bytes
+- Sanity Check : Heap size at the end of program should be 1024 + 512 + 2*40 (Trackers) = 1616 bytes
+- Exp : Max heap usage should be 1024 + 512 = 1536 bytes
+- Exp : Largest allocation should be 1024 bytes
+
+6. Heap reduction
+- Allocate 1024 bytes
+- Allocation 512 bytes
+- Allocate 1024 bytes
+- Allocate 512 bytes
+- Deallocate 1024 bytes (3rd allocation)
+- Deallocate 512 bytes (4th allocation)
+- Sanity Check : Heap usage at the end of program should be 1024 + 512 + 2*40 (Trackers) = 1616 bytes
+- Exp : Max heap usage should be 1024 + 512 + 1024 + 512 = 3072 bytes
+- Exp : Largest allocation should be 1024 bytes
+

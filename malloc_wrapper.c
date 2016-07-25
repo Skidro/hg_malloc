@@ -36,7 +36,14 @@
 #define MEM_GET_END()											\
 		(void *)((unsigned long)((container_of(alloc_list.prev, track_t, list))->address) 	\
 			+ (unsigned long)((container_of(alloc_list.prev, track_t, list))->size))
+
+/* This macro gets the tracker pointer from the linked list node */
+#define TRACKER(list_node)										\
+		(container_of(list_node, track_t, list))
 		
+/* Set this macro to 1 if the allocator is being built for debugging */
+#define BUG_ON	1
+
 /*********************************************
  * Global Data
  ********************************************/
@@ -51,6 +58,15 @@ typedef struct {
 static struct list_head alloc_list;
 static void    		*g_mem_ptr;
 static int 		init = 0;
+static unsigned long	max_used = 0;
+
+#if (BUG_ON == 1)
+
+/* These stats are tracked only when library is built with debug support */
+static unsigned long	max_req  = 0;
+static unsigned long	trackers = 0;
+
+#endif
 
 /*********************************************
  * Helper Functions
@@ -76,6 +92,12 @@ static inline void populate_tracker(track_t *tracker, unsigned long size)
 	tracker->size = size;
 	tracker->address = MEM_GET_ADDRESS(tracker);
 	tracker->free = 0;
+
+#if (BUG_ON == 1)
+	/* Increment the number of active trackers */
+	trackers++;
+#endif
+
 	return;
 }
 
@@ -124,6 +146,9 @@ void *__wrap_malloc(size_t size)
 		/* Populate the tracker with information regaring this allocation */
 		populate_tracker(tracker, (unsigned long)size);
 
+		/* We need to track max_used here as well because this is the one-time init case */
+		max_used = (unsigned long)MEM_GET_ADDRESS(g_mem_ptr) + (unsigned long)size;
+
 		/* Nothing needs to be done for initializtion case */
 		goto done;
 	}
@@ -147,14 +172,24 @@ void *__wrap_malloc(size_t size)
 		/* Populate the tracker with information regaring this allocation */
 		populate_tracker(tracker, (unsigned long)size);
 
+#if (BUG_ON == 1)
+
+		/* We need to track max_used here as well */
+		max_used = (unsigned long)MEM_GET_ADDRESS(g_mem_ptr) + (unsigned long)size;
+
+#endif
+
 		/* Return the address to the caller */
 		goto done;
 	} else {
 		/* List is not empty. Look for the last element in the list */
 		mem_end = MEM_GET_END();
 
+		/* Since we are expanding the heap, this is the best place to record max heap usage */
+		max_used = (unsigned long)MEM_GET_ADDRESS(mem_end) + (unsigned long)size;
+
 		/* Make sure that we have enough memory */
-		if ((unsigned long)MEM_GET_ADDRESS(mem_end) + (unsigned long)size >= MEM_GET_SIZE(g_mem_ptr)) {
+		if (max_used >= MEM_GET_SIZE(g_mem_ptr)) {
 			/* Out of Memory!!! */
 			printf("We are out of Memory!\n");
 
@@ -168,6 +203,13 @@ void *__wrap_malloc(size_t size)
 		/* Populate the tracker with information regaring this allocation */
 		populate_tracker(tracker, (unsigned long)size);
 
+#if (BUG_ON == 1)
+
+		/* For the purpose of debugging, we don't want the tracker size into account */
+		max_used -= trackers * sizeof(track_t);
+
+#endif
+
 		/* Return the address to the caller */
 		goto done;
 	}
@@ -176,6 +218,13 @@ done:
 
 	/* Display some debug information */
 	// printf("Returning Address : %p\n", tracker->address);
+
+#if (BUG_ON == 1)
+
+	/* Find out if this the largest allocation request so far */
+	max_req = (size < max_req) ? max_req : size;
+
+#endif
 
 	/* Return the address to caller */
 	return tracker->address;
@@ -207,9 +256,28 @@ void __wrap_free(void *ptr)
 	/* If the tracker is the last chunk in the heap, then delete it */
 	if ((tracker->list).next == &alloc_list) {
 		list_del_init(&tracker->list);
+
+		/* Keep freeing chunks until all free blocks are deleted from linked list */
+		while (!(list_empty(&alloc_list)) && TRACKER(alloc_list.prev)->free == 1) {
+			list_del_init(alloc_list.prev);
+
+			/* Decrement the number of trackers */
+			trackers--;
+		}
+
+		/* Decrement the number of trackers */
+		trackers--;
 	}
 
+#if (BUG_ON == 1)
+
+	printf("***** Allocator Stats\n");
 	printf("Heap Usage        : %lu Bytes\n", (list_empty(&alloc_list))? 0 : (unsigned long)MEM_GET_END() - (unsigned long)g_mem_ptr);
+	printf("Max Heap Used     : %lu Bytes\n", max_used - (unsigned long)g_mem_ptr);
+	printf("Max Request       : %lu Bytes\n", max_req);
+	printf("Trackers          : %lu\n", trackers);
+
+#endif
 
 	return;
 }
