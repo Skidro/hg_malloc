@@ -6,7 +6,7 @@
 #
 # Description:
 #
-# This script mount hugetlbfs which enables the usage of huge-pages
+# This script mounts hugetlbfs which enables the usage of huge-pages
 # via mmap syscall interface in linux. It is essential that this
 # script should be executed once before using the huge-page malloc
 # allocator
