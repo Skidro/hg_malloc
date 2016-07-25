@@ -137,9 +137,6 @@ void *__wrap_malloc(size_t size)
 			exit(1);
 		}
 
-		/* Output some debug information regarding the start of memory region */
-		// printf("Memory Region     : %p\n", g_mem_ptr);
-
 		/* Place a malloc header at the start of the memory area */
 		tracker = (track_t *)g_mem_ptr;
 
@@ -249,9 +246,6 @@ void __wrap_free(void *ptr)
 
 	/* Mark the tracker as free */
 	tracker->free = 1;
-
-	// printf("Tracker Address   : %p\n", tracker);
-	// printf("Freeing Address   : %p | %p\n", ptr, tracker->address);
 
 	/* If the tracker is the last chunk in the heap, then delete it */
 	if ((tracker->list).next == &alloc_list) {
